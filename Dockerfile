@@ -1,41 +1,37 @@
-# ---------- 1) Imagen base con PHP, Composer y extensiones ----------
-FROM composer:2.7 as build
+# Imagen base con PHP, Composer y extensiones necesarias
+FROM php:8.2-fpm
 
-# Instala Node (para Vite) y dependencias del sistema
+# Instalar utilidades y Node.js (para Vite)
 RUN apt-get update -y && \
-    apt-get install -y git curl unzip nano && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y git curl unzip zip nano libpng-dev libonig-dev libxml2-dev libzip-dev && \
+    docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd zip
+
+# Instalar Node.js (usamos Node 18 LTS por compatibilidad)
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     apt-get install -y nodejs
 
-# Crea directorio de trabajo
+# Instalar Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Crear directorio de trabajo
 WORKDIR /app
 
-# Copia solo composer.json y composer.lock primero (cache)
+# Copiar archivos de Composer y hacer instalación optimizada
 COPY composer.* ./
-
-# ---------- 2) Instala dependencias PHP ----------
 RUN composer install --no-dev --prefer-dist --no-scripts
 
-# ---------- 3) Copia todo el proyecto ----------
+# Copiar el resto del código fuente
 COPY . .
 
-# ---------- 4) Instala dependencias JS y compila Vite ----------
-RUN npm install && npm run build
+# Preparar dependencias de Vite y compilar sin errores de Rollup
+RUN rm -rf node_modules package-lock.json && \
+    npm install --legacy-peer-deps && \
+    npm rebuild && \
+    npm run build
+RUN chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+# Puerto expuesto por Laravel
+EXPOSE 8000
 
-# ---------- 5) Genera la APP_KEY ----------
-RUN php artisan key:generate --force
-
-# ---------- 6) Imagen final slim ----------
-FROM php:8.3-cli
-
-# Instala extensiones necesarias
-RUN docker-php-ext-install pdo pdo_mysql pdo_sqlite
-
-WORKDIR /app
-COPY --from=build /app /app
-
-# Puerto que usará Render ($PORT)
-EXPOSE 8080
-
-# Comando de inicio
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8080"]
+# Comando de arranque del contenedor
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
